@@ -1,0 +1,170 @@
+#!/usr/bin/env python
+
+import math
+import rospy # module for ROS APIs
+from geometry_msgs.msg import Twist # message type for cmd_vel
+from nav_msgs.msg import Odometry # message type for position
+from std_msgs.msg import Float32 # message type for ver_err
+
+# Constants.
+N_SIDES = 6
+L_SIDES = 1
+CLOCKWISE = 1
+
+FREQUENCY = 5 #Hz.
+LINEAR_VELOCITY = 0.2 # m/s
+ANGULAR_VELOCITY = math.pi / 2 # rad/s
+
+DEFAULT_CMD_VEL_TOPIC = 'cmd_vel'
+DEFAULT_VER_ERR_TOPIC = 'ver_err'
+
+class SimpleShapes():
+    def __init__(self, linear_velocity=LINEAR_VELOCITY, angular_velocity=ANGULAR_VELOCITY):
+        """Constructor."""
+
+        # Setting up publishers/subscribers.
+        self._cmd_pub = rospy.Publisher(DEFAULT_CMD_VEL_TOPIC, Twist, queue_size=1)
+        self._err_pub = rospy.Publisher(DEFAULT_VER_ERR_TOPIC, Float32, queue_size=1)
+
+        # Setting up subscriber for odom
+        self._odom_sub = rospy.Subscriber('odom', Odometry, self._odom_callback, queue_size=1)
+
+        # Other variables.
+        self.linear_velocity = linear_velocity # Constant linear velocity set.
+        self.angular_velocity = linear_velocity # Constant linear velocity set.
+
+        #position to be updated by _odom_callback method
+        self.pos_x = 0.0
+        self.pos_y = 0.0
+
+    def move_polygon(self, n, l, clockwise=True):
+        """
+        Function to make robot follow a regular polygon given the sides of polygon as 'n', distance as 'l' 
+        and whether to move clockwise or anticlockwise given by 'clockwise' boolean variable
+        """
+        theta = (360 / n) #outer angle of the polygon
+
+        if clockwise:
+            rotation = -(theta * math.pi / 180) #negative radians to make robot move right
+        else:
+            rotation = theta * math.pi / 180 #positive radians to make robot move left
+
+        ver_err_msg = Float32() #instance of Float32 to store the error in data attribute
+
+        x = self.pos_x
+        y = self.pos_y
+
+        # for every side 'n' of the polygon
+        for i in xrange(0, n):        
+            self.move_forward(l) #move forward 'l' distance
+            
+            x = x + l * math.cos(rotation * i) #theoretical x-axis position
+            y = y + l * math.sin(rotation * i) #theoretical y-axis position
+
+            self.rotate_in_place(rotation) #rotate in place
+
+            error = self.get_error(x, y) #calculate error between theoretical and practical (x,y) points
+
+            ver_err_msg.data = error #store the error
+
+            self._err_pub.publish(ver_err_msg) #publish the error
+
+
+    def move_forward(self, distance):
+        """Function to move_forward for a given distance."""
+        # Rate at which to operate the while loop.
+        rate = rospy.Rate(FREQUENCY)
+
+        # Setting velocities. 
+        twist_msg = Twist()
+        twist_msg.linear.x = self.linear_velocity
+        start_time = rospy.get_rostime()
+        duration = rospy.Duration(distance/twist_msg.linear.x)
+
+        # Loop.
+        while not rospy.is_shutdown():
+            # Check if traveled of given distance based on time.
+            if rospy.get_rostime() - start_time >= duration:
+                break
+
+            self._cmd_pub.publish(twist_msg)
+
+            # Sleep to keep the set publishing frequency.
+            rate.sleep()
+
+        # Traveled the required distance, stop.
+        self.stop()
+        
+    def rotate_in_place(self, rotation_angle):
+        """
+        Rotate in place the robot of rotation_angle (rad) based on fixed velocity.
+        Assumption: Counterclockwise rotation.
+        """
+        twist_msg = Twist()
+        twist_msg.angular.z = self.angular_velocity * (1 if rotation_angle > 0 else -1)
+        
+        duration = abs(rotation_angle / twist_msg.angular.z)
+
+        start_time = rospy.get_rostime()
+        rate = rospy.Rate(FREQUENCY)
+
+        while not rospy.is_shutdown():
+            # Check if done
+            if rospy.get_rostime() - start_time >= rospy.Duration(duration):
+                break
+                
+            # Publish message.
+            self._cmd_pub.publish(twist_msg)
+            
+            # Sleep to keep the set frequency.
+            rate.sleep()
+
+        # Rotated the required angle, stop.
+        self.stop()
+
+    def stop(self):
+        """Stop the robot."""
+        twist_msg = Twist()
+        self._cmd_pub.publish(twist_msg)
+
+    def get_error(self, x, y):
+        """
+        calculate error between theoretical and practical (x,y) points
+        """
+        return ((y - self.pos_y)**2 + (x - self.pos_x)**2)**0.5
+
+    def _odom_callback(self, msg):
+        """
+        Updates pos_x and pos_y attributes of class as the position change is fetched by the subscriber
+        """
+        self.pos_x = msg.pose.pose.position.x
+        self.pos_y = msg.pose.pose.position.y
+
+
+def main():
+    """Main function."""
+    n = rospy.get_param('/simple_shapes/n', N_SIDES)
+    l = rospy.get_param('/simple_shapes/l', L_SIDES)
+    clockwise = True if rospy.get_param('/simple_shapes/clockwise', CLOCKWISE) == 1 else False
+
+    # 1st. initialization of node.
+    rospy.init_node("simple_shapes")
+
+    # Sleep for a few seconds to wait for the registration.
+    rospy.sleep(2)
+
+    # Initialization of the class for the simple motion.
+    simple_shapes = SimpleShapes()
+
+    # If interrupted, send a stop command.
+    rospy.on_shutdown(simple_shapes.stop)
+
+    # Robot moves for a defined shape
+    try:
+        simple_shapes.move_polygon(n, l, clockwise=clockwise)
+    except rospy.ROSInterruptException:
+        rospy.logerr("ROS node interrupted.")
+
+if __name__ == "__main__":
+    """Run the main function."""
+    main()
