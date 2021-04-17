@@ -1,0 +1,15 @@
+# COSC69.13/269, Spring Term 2021, PA1 - Simple shapes, Anmol Chachra
+My program [simple_shapes](https://www.github.com/AnmolChachra/simple_shapes) is a ROS node that allows for a simple following of a regular polygon based on number of sides, distance and velocities. You can also switch between clockwise and anticlockwise motion. It also calculates and publishes the error between practical and theoretical positions at each vertex. Echo our rostopic '/ver_err' to see the error in real time. You can minimize these errors by adjusting parameters from your terminal.
+
+## Method description
+Program is broadly controlled by the following 3 parameters that can be set from the command line - '/simple_shapes/n' to define the number of sides of the regular polygon, '/simple_shapes/l' to define the length of the side and '/simple_shapes/clockwise' to determine whether to move clockwise or anticlockwise. By default these values are set to 6, 1 and 1 respectively.
+
+Program starts off by calling a main function that sets up the parameters, instantiate the node and call 'move_polygon' method of 'SimpleShapes' class. During the instantiation process, the node in return sets up the following publishers - 'Twist' to publish the linear velocity and angular velocity and 'Float32' to publish the error between practical and theoretical location of polygon's vertices. Also, it sets the following subscriber - 'Odometry' to fetch the position of robot as it changes.
+
+The program relies on some constants that configure the movement of the robots - FREQUENCY (5) to publish and update the movements such as forward and rotate, LINEAR_VELOCITY (0.2) to calculate duration of linear motion, ANGULAR_VELOCITY (pi/2) to calculate the duration of angular motion. Reducing frequency acted as a tradeoff while increasing velocities, as now the program takes advantage of the momentum to account for error caused by missed publishing due to signal difference.
+
+When 'move_polygon' is called, the program calculate a rotation angle i.e. the outer angle of a polygon in radians. It is negative for clockwise and positive for anticlockwise. It instantiates the Float32 message data structure and for every side of the polygon it moves forward, rotate, calculate the error distance between theoretical and practical points and then publish it.
+
+## Evaluation
+The program was evaluated on different sides, different lengths and for both clockwise and anti clockwise directions. It correctly follows the desired polygon, with a small catch. There is a minor error for every polygon that arises due to frequency of checking if the duration desired is met. Other factors include the momentum of robot both angular and linear.
+To show case the performance we provide videos and respective error snapshots for triangle, square and polygon. File name structure is as follows '[shape]\_[clockwise|anticlockwise].mp4' for videos and '[shape]\_[clockwise|anticlockwise].png'. Please see videos folder in the package main directory.
